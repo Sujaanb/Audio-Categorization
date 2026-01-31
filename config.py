@@ -1,24 +1,60 @@
-from typing import List
+"""
+Configuration settings for AI-Generated Voice Detection API.
+Uses pydantic-settings to load from environment variables and .env file.
+"""
 
-from pydantic_settings import BaseSettings
+import os
+from typing import Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    API_V1_STR: str = "/AC/content/v1"
+    """Application settings loaded from environment variables."""
 
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "https://localhost:3000",
-        "https://localhost:8000",
-        "http://localhost:5173",
-        "https://localhost:5173",
-    ]
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
-    PROJECT_NAME: str = "Audio Categorization Platform APIs"
+    # Project metadata
+    PROJECT_NAME: str = "AI-Generated Voice Detection API"
 
-    class Config:
-        case_sensitive = True
+    # API documentation (disabled by default for production)
+    ENABLE_DOCS: bool = False
+
+    # API authentication (comma-separated list of valid API keys)
+    VOICE_API_KEYS: str = ""
+
+    # Detector backend selection
+    # Options: "qc_fallback", "dsp", "ssl", "antispoof", "ensemble", "external"
+    DETECTOR_BACKEND: str = "qc_fallback"
+
+    # Audio size limits
+    MAX_MP3_BYTES: int = 15_000_000  # 15 MB
+    MAX_DURATION_SECONDS: float = 300.0  # 5 minutes
+    MIN_DURATION_SECONDS: float = 0.5  # 0.5 seconds
+
+    # Quality control thresholds
+    SILENCE_RATIO_THRESHOLD: float = 0.80  # 80% silence triggers low-confidence
+
+    # Server configuration
+    PORT: int = 8080
+
+    def get_api_keys(self) -> list[str]:
+        """Parse comma-separated API keys into a list."""
+        if not self.VOICE_API_KEYS:
+            return []
+        return [key.strip() for key in self.VOICE_API_KEYS.split(",") if key.strip()]
+
+    def get_max_base64_length(self) -> int:
+        """
+        Calculate max base64 string length based on MAX_MP3_BYTES.
+        Base64 encoding increases size by ~4/3, add margin for padding.
+        """
+        return int(self.MAX_MP3_BYTES * 4 / 3) + 100
 
 
 settings = Settings()
