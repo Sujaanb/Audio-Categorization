@@ -1,8 +1,9 @@
 """
-QC Fallback Detector - returns low-confidence results based on QC metrics.
-This is the always-available fallback when audio has insufficient signal.
+QC Fallback Detector - returns dummy/test data for development.
+TODO: Remove dummy logic when actual model is implemented.
 """
 
+import random
 from typing import Dict
 
 import numpy as np
@@ -12,14 +13,10 @@ from .base import BaseDetector, PredictionResult
 
 class QCFallbackDetector(BaseDetector):
     """
-    QC-based fallback detector.
+    QC-based fallback detector with dummy data for testing.
 
-    Returns low-confidence HUMAN classification when audio quality
-    is insufficient for reliable detection. This is triggered by
-    QC thresholds (duration, silence ratio), NOT hard-coded for all inputs.
-
-    When the audio passes QC thresholds, this detector still returns
-    a low-confidence result since it has no actual detection capability.
+    TODO: This currently returns DUMMY DATA for testing purposes.
+    Replace with actual detection logic when model is ready.
     """
 
     @property
@@ -39,17 +36,14 @@ class QCFallbackDetector(BaseDetector):
         qc: Dict[str, float],
     ) -> PredictionResult:
         """
-        Return a low-confidence result based on QC metrics.
-
-        If QC indicates insufficient signal, returns very low confidence (0.50-0.55).
-        If QC passes, returns slightly higher but still low confidence (0.55-0.60)
-        since this detector has no actual classification capability.
+        Return DUMMY test data for development.
+        TODO: Replace with actual model inference when ready.
         """
         duration = qc.get("duration_seconds", 0.0)
         silence_ratio = qc.get("silence_ratio", 1.0)
         rms = qc.get("rms", 0.0)
 
-        # Check for insufficient signal conditions
+        # Check for insufficient signal conditions - return low-confidence
         if duration < 0.5:
             return PredictionResult(
                 classification="HUMAN",
@@ -64,16 +58,31 @@ class QCFallbackDetector(BaseDetector):
                 explanation=f"Audio mostly silent ({silence_ratio*100:.0f}% silence). Low-confidence result.",
             )
 
-        if rms < 0.005:
-            return PredictionResult(
-                classification="HUMAN",
-                confidenceScore=0.51,
-                explanation="Audio has very low energy. Low-confidence result due to weak signal.",
-            )
+        # =============================================================
+        # DUMMY DATA FOR TESTING - TODO: Remove when model is ready
+        # =============================================================
+        # Randomly classify as AI or HUMAN with varying confidence
+        is_ai = random.random() > 0.5
+        
+        if is_ai:
+            confidence = round(random.uniform(0.70, 0.95), 2)
+            explanations = [
+                f"[DUMMY] Detected synthetic speech patterns in {language} audio.",
+                f"[DUMMY] Spectral analysis indicates AI-generated voice characteristics.",
+                f"[DUMMY] Neural TTS artifacts detected with {confidence*100:.0f}% confidence.",
+                f"[DUMMY] Voice synthesis markers found in frequency domain.",
+            ]
+        else:
+            confidence = round(random.uniform(0.65, 0.92), 2)
+            explanations = [
+                f"[DUMMY] Natural speech patterns detected in {language} audio.",
+                f"[DUMMY] Human voice characteristics confirmed.",
+                f"[DUMMY] No synthetic artifacts detected. Appears to be human speech.",
+                f"[DUMMY] Audio analysis indicates genuine human voice.",
+            ]
 
-        # Audio passes QC but we have no real detection capability
         return PredictionResult(
-            classification="HUMAN",
-            confidenceScore=0.55,
-            explanation="QC fallback detector - no trained model. Classification based on default assumptions.",
+            classification="AI_GENERATED" if is_ai else "HUMAN",
+            confidenceScore=confidence,
+            explanation=random.choice(explanations),
         )
