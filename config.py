@@ -28,9 +28,13 @@ class Settings(BaseSettings):
     # API authentication (comma-separated list of valid API keys)
     VOICE_API_KEYS: str = ""
 
-    # Detector backend selection
-    # Options: "qc_fallback", "dsp", "ssl", "antispoof", "ensemble", "external"
-    DETECTOR_BACKEND: str = "qc_fallback"
+    # AASIST Model Configuration
+    # Path to TorchScript model file (.pt)
+    AASIST_MODEL_PATH: str = "models/aasist_finetuned.pt"
+    # Device for inference: "cpu" or "cuda"
+    AASIST_DEVICE: str = "cpu"
+    # Classification threshold (spoof probability > threshold = AI_GENERATED)
+    AASIST_THRESHOLD: float = 0.5
 
     # Audio size limits
     MAX_MP3_BYTES: int = 15_000_000  # 15 MB

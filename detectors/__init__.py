@@ -1,4 +1,4 @@
-"""Detector plugin system for voice detection."""
+"""AASIST detector for AI-generated voice detection."""
 
 from .base import BaseDetector, PredictionResult
 from .registry import get_detector, initialize_detector, reset_detector

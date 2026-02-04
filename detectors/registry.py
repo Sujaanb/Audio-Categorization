@@ -1,5 +1,5 @@
 """
-Detector registry - singleton pattern for detector initialization.
+Detector registry - singleton pattern for AASIST detector initialization.
 """
 
 import logging
@@ -15,7 +15,7 @@ _detector_instance: Optional[BaseDetector] = None
 
 def get_detector() -> BaseDetector:
     """
-    Get the initialized detector instance.
+    Get the initialized AASIST detector instance.
 
     Returns:
         The current detector instance.
@@ -30,56 +30,29 @@ def get_detector() -> BaseDetector:
     return _detector_instance
 
 
-def initialize_detector(backend: str) -> BaseDetector:
+def initialize_detector() -> BaseDetector:
     """
-    Initialize the detector based on backend name.
+    Initialize the AASIST detector.
 
-    Args:
-        backend: Name of the detector backend to use.
-                 Options: "qc_fallback", "dsp", "ssl", "antispoof", "ensemble", "external"
+    Loads the AASIST model and stores it as a singleton for the application lifetime.
+    This should be called once at application startup.
 
     Returns:
-        Initialized detector instance.
+        Initialized AASIST detector instance.
 
     Raises:
-        ValueError: If backend name is not recognized.
+        RuntimeError: If model loading fails.
+        FileNotFoundError: If model file doesn't exist.
     """
     global _detector_instance
 
-    logger.info(f"Initializing detector backend: {backend}")
+    logger.info("Initializing AASIST detector")
 
-    # Import detectors lazily to avoid circular imports
-    if backend == "qc_fallback":
-        from .qc_fallback import QCFallbackDetector
-        detector = QCFallbackDetector()
+    from .aasist_detector import AASISTDetector
 
-    elif backend == "dsp":
-        from .dsp_stub import DSPDetector
-        detector = DSPDetector()
+    detector = AASISTDetector()
 
-    elif backend == "ssl":
-        from .ssl_stub import SSLDetector
-        detector = SSLDetector()
-
-    elif backend == "antispoof":
-        from .antispoof_stub import AntispoofDetector
-        detector = AntispoofDetector()
-
-    elif backend == "ensemble":
-        from .ensemble_stub import EnsembleDetector
-        detector = EnsembleDetector()
-
-    elif backend == "external":
-        from .external_stub import ExternalDetector
-        detector = ExternalDetector()
-
-    else:
-        raise ValueError(
-            f"Unknown detector backend: {backend}. "
-            f"Valid options: qc_fallback, dsp, ssl, antispoof, ensemble, external"
-        )
-
-    # Call load() to initialize the detector
+    # Load the model (will raise on failure)
     detector.load()
 
     _detector_instance = detector

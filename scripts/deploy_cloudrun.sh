@@ -20,6 +20,10 @@ IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 # API configuration
 VOICE_API_KEYS="${VOICE_API_KEYS:-your-production-api-key}"
 
+# AASIST model configuration
+AASIST_MODEL_PATH="${AASIST_MODEL_PATH:-/app/models/aasist_finetuned.pt}"
+AASIST_DEVICE="${AASIST_DEVICE:-cpu}"
+
 # =============================================================================
 # BUILD AND DEPLOY
 # =============================================================================
@@ -51,11 +55,12 @@ gcloud run deploy "${SERVICE_NAME}" \
     --platform managed \
     --allow-unauthenticated \
     --set-env-vars="VOICE_API_KEYS=${VOICE_API_KEYS}" \
-    --set-env-vars="DETECTOR_BACKEND=qc_fallback" \
+    --set-env-vars="AASIST_MODEL_PATH=${AASIST_MODEL_PATH}" \
+    --set-env-vars="AASIST_DEVICE=${AASIST_DEVICE}" \
     --set-env-vars="ENABLE_DOCS=0" \
     --set-env-vars="MAX_MP3_BYTES=15000000" \
     --set-env-vars="MAX_DURATION_SECONDS=300" \
-    --memory=512Mi \
+    --memory=1Gi \
     --cpu=1 \
     --timeout=120s \
     --concurrency=1 \
@@ -65,7 +70,7 @@ gcloud run deploy "${SERVICE_NAME}" \
 # Note on settings:
 # - concurrency=1: Each instance handles one request at a time (safer for ML models)
 # - timeout=120s: Allow up to 2 minutes per request for audio processing
-# - memory=512Mi: Sufficient for audio processing, increase for larger models
+# - memory=1Gi: Increased for PyTorch model loading
 # - min-instances=0: Scale to zero when idle (cost savings)
 
 echo ""

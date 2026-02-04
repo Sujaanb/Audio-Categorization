@@ -26,24 +26,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """
     Application lifespan handler.
-    Initializes the detector at startup.
+    Initializes the AASIST detector at startup.
     """
     logger.info("Starting AI-Generated Voice Detection API")
-    logger.info(f"Detector backend: {settings.DETECTOR_BACKEND}")
     logger.info(f"Docs enabled: {settings.ENABLE_DOCS}")
 
-    # Initialize detector at startup
+    # Initialize AASIST detector at startup (fail fast on error)
     try:
-        initialize_detector(settings.DETECTOR_BACKEND)
-        logger.info("Detector initialized successfully")
-    except NotImplementedError as e:
-        logger.warning(f"Detector not fully implemented: {e}")
-        # Fall back to qc_fallback if the selected detector is not implemented
-        if settings.DETECTOR_BACKEND != "qc_fallback":
-            logger.info("Falling back to qc_fallback detector")
-            initialize_detector("qc_fallback")
+        initialize_detector()
+        logger.info("AASIST detector initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize detector: {e}")
+        logger.error(f"Failed to initialize AASIST detector: {e}")
         raise
 
     yield
