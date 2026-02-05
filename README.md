@@ -2,7 +2,7 @@
 
 FastAPI backend for detecting AI-generated speech vs human speech. Supports **Tamil**, **English**, **Hindi**, **Malayalam**, and **Telugu** languages.
 
-Built for the hackathon "AI-Generated Voice Detection" with production deployment on Google Cloud Run.
+Uses **AASIST ensemble inference** (original + fine-tuned models) with heuristic pattern rules for improved multilingual detection. Built for production deployment on **Google Cloud Run (CPU-only)**.
 
 ## Quick Start
 
@@ -18,23 +18,33 @@ pip install -r requirements.txt
 # Copy example config
 cp .env.example .env
 
-# Edit .env and set your API key and model path
+# Edit .env and set your API key and model paths
 # VOICE_API_KEYS=your-secret-key-here
-# AASIST_MODEL_PATH=models/aasist_finetuned.pt
+# AASIST_ORIG_WEIGHTS_GCS_URI=gs://bucket/original.pth
+# AASIST_FT_WEIGHTS_GCS_URI=gs://bucket/finetuned.pth
 ```
 
 ### 3. Run Locally
 
 ```bash
-# Option 1: Direct Python
+# Start the server
 python api.py
 
-# Option 2: Use the script (Linux/Mac)
-chmod +x scripts/run_local.sh
-./scripts/run_local.sh
+# Or use uvicorn directly
+uvicorn api:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 Server runs at `http://localhost:8001` with docs at `/docs` (when `ENABLE_DOCS=1`).
+
+### 4. Test the API
+
+```bash
+# Python test script
+python scripts/test_local.py --audio your_audio.mp3 --api-key your-key
+
+# Or curl
+./scripts/test_curl.sh your_audio.mp3 your-key
+```
 
 ---
 
@@ -48,10 +58,10 @@ POST /api/voice-detection
 
 ### Headers
 
-| Header         | Required | Description                |
-| -------------- | -------- | -------------------------- |
-| `Content-Type` | Yes      | Must be `application/json` |
-| `x-api-key`    | Yes      | Your API key               |
+| Header         | Required | Description                         |
+| -------------- | -------- | ----------------------------------- |
+| `Content-Type` | Yes      | Must be `application/json`          |
+| `x-api-key`    | Yes      | Your API key (case-insensitive)     |
 
 ### Request Body
 
@@ -77,7 +87,7 @@ POST /api/voice-detection
   "language": "English",
   "classification": "AI_GENERATED",
   "confidenceScore": 0.87,
-  "explanation": "AASIST anti-spoof model detected patterns consistent with synthetic speech."
+  "explanation": "Ensemble: English FAKE (direct detection). Orig(fake=93%), FT(real=45%)"
 }
 ```
 
@@ -90,141 +100,91 @@ POST /api/voice-detection
 }
 ```
 
-### Example curl
-
-```bash
-# Encode your MP3 file
-AUDIO_BASE64=$(base64 -w 0 your_audio.mp3)
-
-# Make request
-curl -X POST http://localhost:8001/api/voice-detection \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: your-api-key" \
-  -d "{
-    \"language\": \"English\",
-    \"audioFormat\": \"mp3\",
-    \"audioBase64\": \"${AUDIO_BASE64}\"
-  }"
-```
-
 ---
 
 ## Configuration
 
-All settings are configurable via environment variables:
-
-| Variable                  | Default                      | Description                             |
-| ------------------------- | ---------------------------- | --------------------------------------- |
-| `VOICE_API_KEYS`          | (required)                   | Comma-separated valid API keys          |
-| `AASIST_MODEL_PATH`       | `models/aasist_finetuned.pt` | Path to TorchScript model file          |
-| `AASIST_DEVICE`           | `cpu`                        | Device for inference: `cpu` or `cuda`   |
-| `AASIST_THRESHOLD`        | `0.5`                        | Classification threshold                |
-| `ENABLE_DOCS`             | `0`                          | Set to `1` to enable `/docs`            |
-| `MAX_MP3_BYTES`           | `15000000`                   | Max decoded MP3 size (15 MB)            |
-| `MAX_DURATION_SECONDS`    | `300`                        | Max audio duration (5 minutes)          |
-| `MIN_DURATION_SECONDS`    | `0.5`                        | Min audio duration                      |
-| `SILENCE_RATIO_THRESHOLD` | `0.80`                       | Silence ratio for low-confidence result |
-| `PORT`                    | `8080`                       | Server port (Cloud Run sets this)       |
+| Variable                     | Default                          | Description                             |
+| ---------------------------- | -------------------------------- | --------------------------------------- |
+| `VOICE_API_KEYS`             | (required)                       | Comma-separated valid API keys          |
+| `AASIST_DEVICE`              | `cpu`                            | Device: `cpu` or `cuda`                 |
+| `AASIST_ORIG_WEIGHTS_GCS_URI`| (empty)                          | GCS URI for original model weights      |
+| `AASIST_FT_WEIGHTS_GCS_URI`  | (empty)                          | GCS URI for fine-tuned model weights    |
+| `AASIST_ORIG_CACHE_PATH`     | `/tmp/aasist_original.pth`       | Local cache path for original weights   |
+| `AASIST_FT_CACHE_PATH`       | `/tmp/aasist_finetuned_best.pth` | Local cache path for finetuned weights  |
+| `AASIST_THRESHOLD`           | `0.5`                            | Classification threshold                |
+| `AASIST_MAX_WINDOWS`         | `3`                              | Max windows for long audio              |
+| `ENABLE_DOCS`                | `0`                              | Set to `1` to enable `/docs`            |
+| `MAX_MP3_BYTES`              | `15000000`                       | Max decoded MP3 size (15 MB)            |
+| `MAX_DURATION_SECONDS`       | `300`                            | Max audio duration (5 minutes)          |
 
 ---
 
-## AASIST Detector
+## Ensemble Model Architecture
 
-This API uses the **AASIST** (Audio Anti-Spoofing using Integrated Spectro-Temporal) model for detecting AI-generated speech.
+This API uses an **ensemble of two AASIST models**:
 
-### Model Requirements
+1. **Original AASIST** - English-trained baseline
+2. **Fine-tuned AASIST** - Multilingual fine-tuned model
 
-1. **Export your fine-tuned AASIST model as TorchScript**:
-   ```python
-   # In your training pipeline
-   traced_model = torch.jit.trace(model, example_input)
-   torch.jit.save(traced_model, "aasist_finetuned.pt")
+### Multi-Window Inference
+
+For audio longer than ~4 seconds, the detector samples multiple evenly-spaced windows (default: 3) and averages scores.
+
+### Heuristic Pattern Rules
+
+The ensemble uses pattern detection to handle inverted predictions for Indian languages:
+
+| Pattern | Original Model | Fine-tuned | Result |
+|---------|---------------|------------|--------|
+| Indian REAL | >95% fake | >95% real | HUMAN (inverted) |
+| Indian FAKE | <15% fake | >80% real | AI_GENERATED (inverted) |
+| English FAKE | >92% fake | - | AI_GENERATED |
+| English REAL | 85-92% fake | >95% real | HUMAN |
+
+---
+
+## Cloud Run Deployment
+
+### Prerequisites
+
+1. Upload model weights to GCS:
+   ```bash
+   gsutil cp aasist_original.pth gs://your-bucket/aasist_original.pth
+   gsutil cp aasist_finetuned_best.pth gs://your-bucket/aasist_finetuned_best.pth
    ```
 
-2. **Place the `.pt` file** at the path specified by `AASIST_MODEL_PATH`
+2. Set environment variables:
+   ```bash
+   export GCP_PROJECT_ID=your-project
+   export VOICE_API_KEYS=your-production-key
+   export AASIST_ORIG_WEIGHTS_GCS_URI=gs://your-bucket/aasist_original.pth
+   export AASIST_FT_WEIGHTS_GCS_URI=gs://your-bucket/aasist_finetuned_best.pth
+   ```
 
-3. **Model output format**: The model should output logits of shape `[batch, 2]` where:
-   - Index 0 = spoof score (AI-generated)
-   - Index 1 = bonafide score (human)
+3. Deploy:
+   ```bash
+   chmod +x scripts/deploy_cloudrun.sh
+   ./scripts/deploy_cloudrun.sh
+   ```
 
-### Classification Logic
+### Resource Allocation
 
-- If `softmax(logits)[0] > AASIST_THRESHOLD`: → `AI_GENERATED`
-- Otherwise: → `HUMAN`
-- Confidence score is the probability of the predicted class
-
----
-
-## Docker & Cloud Run Deployment
-
-### Build Docker Image
-
-```bash
-docker build -t voice-detection-api .
-```
-
-### Run Locally with Docker
-
-```bash
-docker run -p 8080:8080 \
-  -e VOICE_API_KEYS=your-key \
-  -e AASIST_MODEL_PATH=/app/models/aasist_finetuned.pt \
-  -v /path/to/models:/app/models \
-  voice-detection-api
-```
-
-### Deploy to Cloud Run
-
-```bash
-# Set your project
-export GCP_PROJECT_ID=your-project
-export VOICE_API_KEYS=your-production-key
-
-# Run deployment script
-chmod +x scripts/deploy_cloudrun.sh
-./scripts/deploy_cloudrun.sh
-```
-
-Or manually:
-
-```bash
-# Build with Cloud Build
-gcloud builds submit --tag gcr.io/$GCP_PROJECT_ID/voice-detection-api
-
-# Deploy
-gcloud run deploy voice-detection-api \
-  --image gcr.io/$GCP_PROJECT_ID/voice-detection-api \
-  --region asia-south1 \
-  --allow-unauthenticated \
-  --set-env-vars="VOICE_API_KEYS=$VOICE_API_KEYS,AASIST_MODEL_PATH=/app/models/aasist_finetuned.pt,ENABLE_DOCS=0"
-```
-
-**Note**: Cloud Run has ~32 MiB request size limit. Keep MP3 files under `MAX_MP3_BYTES` (15 MB default).
+- **Memory**: 4 GiB (two PyTorch models)
+- **CPU**: 2 vCPUs
+- **Timeout**: 300s
+- **Concurrency**: 1 (ML model inference)
 
 ---
 
 ## Testing
 
 ```bash
-# Install test dependencies (already in requirements.txt)
-pip install pytest httpx
-
 # Run all tests
 pytest tests/ -v
 
-# Run specific test file
-pytest tests/test_auth.py -v
-
-# Quick test
-pytest -q
+# Tests mock the detector - no model files needed
 ```
-
-Tests cover:
-- **Authentication**: API key validation
-- **Validation**: Request body validation
-- **Contract**: Response JSON shape verification
-
-**Note**: Tests mock the AASIST detector to avoid requiring a real model file.
 
 ---
 
@@ -233,23 +193,22 @@ Tests cover:
 ```
 ├── api.py                 # FastAPI app entrypoint
 ├── config.py              # Settings (pydantic-settings)
-├── base_requests.py       # Request/response Pydantic models
 ├── platform_services.py   # /api/voice-detection endpoint
+├── models/
+│   └── AASIST.py          # AASIST model architecture
 ├── services/
 │   ├── audio_io.py        # FFmpeg MP3 decoder
+│   ├── gcs_weights.py     # GCS download utility
 │   └── qc.py              # Quality control metrics
 ├── detectors/
 │   ├── base.py            # BaseDetector interface
 │   ├── registry.py        # Detector initialization
-│   └── aasist_detector.py # AASIST model inference
-├── tests/
-│   ├── conftest.py        # Pytest fixtures
-│   ├── test_auth.py
-│   ├── test_validation.py
-│   └── test_contract.py
+│   └── aasist_detector.py # Ensemble detector
 ├── scripts/
-│   ├── run_local.sh       # Local development
-│   └── deploy_cloudrun.sh # Cloud Run deployment
+│   ├── deploy_cloudrun.sh # Cloud Run deployment
+│   ├── test_local.py      # Python test script
+│   └── test_curl.sh       # Curl test script
+├── tests/
 ├── Dockerfile
 ├── requirements.txt
 └── .env.example

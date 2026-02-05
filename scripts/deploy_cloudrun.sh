@@ -5,6 +5,7 @@
 # - gcloud CLI installed and authenticated
 # - Docker installed (for local builds)
 # - Project ID and region configured
+# - Model weights uploaded to GCS bucket
 
 set -e
 
@@ -20,9 +21,14 @@ IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 # API configuration
 VOICE_API_KEYS="${VOICE_API_KEYS:-your-production-api-key}"
 
-# AASIST model configuration
-AASIST_MODEL_PATH="${AASIST_MODEL_PATH:-/app/models/aasist_finetuned.pt}"
-AASIST_DEVICE="${AASIST_DEVICE:-cpu}"
+# AASIST ensemble model configuration
+AASIST_DEVICE="cpu"
+AASIST_ORIG_WEIGHTS_GCS_URI="${AASIST_ORIG_WEIGHTS_GCS_URI:-gs://your-bucket/aasist_original.pth}"
+AASIST_FT_WEIGHTS_GCS_URI="${AASIST_FT_WEIGHTS_GCS_URI:-gs://your-bucket/aasist_finetuned_best.pth}"
+AASIST_ORIG_CACHE_PATH="/tmp/aasist_original.pth"
+AASIST_FT_CACHE_PATH="/tmp/aasist_finetuned_best.pth"
+AASIST_MAX_WINDOWS="3"
+AASIST_THRESHOLD="0.5"
 
 # =============================================================================
 # BUILD AND DEPLOY
@@ -55,23 +61,28 @@ gcloud run deploy "${SERVICE_NAME}" \
     --platform managed \
     --allow-unauthenticated \
     --set-env-vars="VOICE_API_KEYS=${VOICE_API_KEYS}" \
-    --set-env-vars="AASIST_MODEL_PATH=${AASIST_MODEL_PATH}" \
     --set-env-vars="AASIST_DEVICE=${AASIST_DEVICE}" \
+    --set-env-vars="AASIST_ORIG_WEIGHTS_GCS_URI=${AASIST_ORIG_WEIGHTS_GCS_URI}" \
+    --set-env-vars="AASIST_FT_WEIGHTS_GCS_URI=${AASIST_FT_WEIGHTS_GCS_URI}" \
+    --set-env-vars="AASIST_ORIG_CACHE_PATH=${AASIST_ORIG_CACHE_PATH}" \
+    --set-env-vars="AASIST_FT_CACHE_PATH=${AASIST_FT_CACHE_PATH}" \
+    --set-env-vars="AASIST_MAX_WINDOWS=${AASIST_MAX_WINDOWS}" \
+    --set-env-vars="AASIST_THRESHOLD=${AASIST_THRESHOLD}" \
     --set-env-vars="ENABLE_DOCS=0" \
     --set-env-vars="MAX_MP3_BYTES=15000000" \
     --set-env-vars="MAX_DURATION_SECONDS=300" \
-    --memory=1Gi \
-    --cpu=1 \
-    --timeout=120s \
+    --memory=4Gi \
+    --cpu=2 \
+    --timeout=300s \
     --concurrency=1 \
     --min-instances=0 \
     --max-instances=10
 
 # Note on settings:
 # - concurrency=1: Each instance handles one request at a time (safer for ML models)
-# - timeout=120s: Allow up to 2 minutes per request for audio processing
-# - memory=1Gi: Increased for PyTorch model loading
-# - min-instances=0: Scale to zero when idle (cost savings)
+# - timeout=300s: Allow up to 5 minutes per request for audio processing
+# - memory=4Gi: Increased for PyTorch ensemble model loading (2 models)
+# - cpu=2: Two CPUs for ensemble inference
 
 echo ""
 echo "========================================"
@@ -79,4 +90,10 @@ echo "Deployment complete!"
 echo ""
 echo "Get the service URL with:"
 echo "  gcloud run services describe ${SERVICE_NAME} --region ${REGION} --format='value(status.url)'"
+echo ""
+echo "Test the API with:"
+echo "  curl -X POST <SERVICE_URL>/api/voice-detection \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -H 'x-api-key: ${VOICE_API_KEYS}' \\"
+echo "    -d '{\"language\": \"English\", \"audioFormat\": \"mp3\", \"audioBase64\": \"<BASE64_MP3>\"}'"
 echo "========================================"

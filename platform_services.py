@@ -71,10 +71,12 @@ async def verify_api_key(api_key: Optional[str] = Depends(api_key_header)) -> st
             ).model_dump(),
         )
 
-    # Constant-time comparison for each valid key
+    # Constant-time comparison for each valid key (case-insensitive)
+    # Normalize both incoming key and stored keys to lowercase
     is_valid = False
+    api_key_lower = api_key.lower()
     for valid_key in valid_keys:
-        if hmac.compare_digest(api_key.encode("utf-8"), valid_key.encode("utf-8")):
+        if hmac.compare_digest(api_key_lower.encode("utf-8"), valid_key.lower().encode("utf-8")):
             is_valid = True
             break
 

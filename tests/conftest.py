@@ -15,31 +15,35 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Set test environment variables BEFORE importing app
 os.environ["VOICE_API_KEYS"] = "test-key-123,test-key-456"
 os.environ["ENABLE_DOCS"] = "1"
-os.environ["AASIST_MODEL_PATH"] = "models/test_model.pt"  # Doesn't need to exist - we mock
 os.environ["AASIST_DEVICE"] = "cpu"
 os.environ["AASIST_THRESHOLD"] = "0.5"
+os.environ["AASIST_MAX_WINDOWS"] = "3"
+os.environ["AASIST_ORIG_WEIGHTS_GCS_URI"] = ""  # Empty = use local paths
+os.environ["AASIST_FT_WEIGHTS_GCS_URI"] = ""
+os.environ["AASIST_ORIG_CACHE_PATH"] = "/tmp/test_original.pth"
+os.environ["AASIST_FT_CACHE_PATH"] = "/tmp/test_finetuned.pth"
 
 # Import base classes before mocking
 from detectors.base import PredictionResult
 
 # Create mock detector instance
 _mock_detector = MagicMock()
-_mock_detector.name = "aasist"
+_mock_detector.name = "aasist_ensemble"
 _mock_detector.load = MagicMock()
 _mock_detector.predict = MagicMock(return_value=PredictionResult(
     classification="HUMAN",
     confidenceScore=0.75,
-    explanation="[TEST] Mocked AASIST detector result for testing."
+    explanation="[TEST] Mocked AASIST ensemble detector result for testing."
 ))
 
 # Import the aasist_detector module to ensure it's loaded
 import detectors.aasist_detector
 
-# Mock the AASISTDetector class
+# Mock the AASISTEnsembleDetector class
 _mock_aasist_class = MagicMock(return_value=_mock_detector)
 
 # Patch at module level so it's applied before app import
-_patcher = patch.object(detectors.aasist_detector, 'AASISTDetector', _mock_aasist_class)
+_patcher = patch.object(detectors.aasist_detector, 'AASISTEnsembleDetector', _mock_aasist_class)
 _patcher.start()
 
 # Now import the app (detector will be mocked)
