@@ -30,7 +30,7 @@ venv/
 ENV/
 env/
 
-# Environment files (secrets - never commit these!)
+# Environment files (secrets)
 .env
 .env.local
 .env.*.local
@@ -70,14 +70,14 @@ logs/
 ehthumbs.db
 Thumbs.db
 
-# Model weights / artifacts (add specific patterns as needed)
-*.pt
-*.pth
-*.onnx
-*.bin
-
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
 # mypy
 .mypy_cache/
+
+# Temporary base64 files
+audio_base64.txt
+audio_base64_files/
+audio_samples/
+audio_to_base64.py

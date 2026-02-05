@@ -46,11 +46,11 @@ def initialize_detector() -> BaseDetector:
     """
     global _detector_instance
 
-    logger.info("Initializing AASIST ensemble detector")
+    logger.info("Initializing AASIST detector")
 
-    from .aasist_detector import AASISTEnsembleDetector
+    from .aasist_detector import AASISTDetector
 
-    detector = AASISTEnsembleDetector()
+    detector = AASISTDetector()
 
     # Load the model (will raise on failure)
     detector.load()

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env.local",
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
@@ -19,27 +19,21 @@ class Settings(BaseSettings):
     # Project metadata
     PROJECT_NAME: str = "AI-Generated Voice Detection API"
 
-    # API documentation (disabled by default for production)
-    ENABLE_DOCS: bool = False
+    # API documentation (enabled by default)
+    ENABLE_DOCS: bool = True
 
     # API authentication (comma-separated list of valid API keys)
     VOICE_API_KEYS: str = ""
 
     # ==========================================================================
-    # AASIST Ensemble Model Configuration
+    # AASIST Model Configuration
     # ==========================================================================
 
     # Device for inference: "cpu" or "cuda"
     AASIST_DEVICE: str = "cpu"
 
-    # GCS URIs for model weights (gs://bucket/path format)
-    # Leave empty to use local paths only
-    AASIST_ORIG_WEIGHTS_GCS_URI: str = ""
-    AASIST_FT_WEIGHTS_GCS_URI: str = ""
-
-    # Local cache paths for downloaded weights
-    AASIST_ORIG_CACHE_PATH: str = "/tmp/aasist_original.pth"
-    AASIST_FT_CACHE_PATH: str = "/tmp/aasist_finetuned_best.pth"
+    # Path to model weights file
+    AASIST_WEIGHTS_PATH: str = "./model_weights/aasist_original.pth"
 
     # Classification threshold (spoof probability > threshold = AI_GENERATED)
     AASIST_THRESHOLD: float = 0.5
@@ -56,7 +50,7 @@ class Settings(BaseSettings):
     MIN_DURATION_SECONDS: float = 0.5  # 0.5 seconds
 
     # Quality control thresholds
-    SILENCE_RATIO_THRESHOLD: float = 0.80  # 80% silence triggers low-confidence
+    SILENCE_RATIO_THRESHOLD: float = 0.80
 
     # ==========================================================================
     # Server Configuration
@@ -71,10 +65,7 @@ class Settings(BaseSettings):
         return [key.strip() for key in self.VOICE_API_KEYS.split(",") if key.strip()]
 
     def get_max_base64_length(self) -> int:
-        """
-        Calculate max base64 string length based on MAX_MP3_BYTES.
-        Base64 encoding increases size by ~4/3, add margin for padding.
-        """
+        """Calculate max base64 string length based on MAX_MP3_BYTES."""
         return int(self.MAX_MP3_BYTES * 4 / 3) + 100
 
 
