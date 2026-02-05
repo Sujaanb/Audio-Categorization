@@ -67,16 +67,19 @@ app.include_router(api_router)
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
-    # Use port 8001 for local development, 8080 for production
-    port = 8001
+    # Use PORT from environment (Cloud Run sets this) or default to 8001 for local
+    port = int(os.environ.get("PORT", 8001))
     logger.info(f"Starting server on port {port}")
 
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
         port=port,
-        reload=True,
+        reload=os.environ.get("PORT") is None,  # Only reload in local dev
         log_level="info",
     )
+

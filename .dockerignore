@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+venv/
+.venv/
+
+# Environment files
+.env
+.env.local
+.env.*
+
+# IDE
+.idea/
+.vscode/
+
+# Test/dev files
+audio_samples/
+audio_base64_files/
+audio_base64.txt
+audio_to_base64.py
+
+# Docs
+README.md
+*.md
