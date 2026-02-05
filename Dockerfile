@@ -11,10 +11,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Install system dependencies
 # - ffmpeg: audio processing
 # - libsndfile1: required by soundfile Python package
+# - libgomp1: OpenMP runtime required by PyTorch
 # - ca-certificates: SSL/TLS support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
+    libgomp1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
