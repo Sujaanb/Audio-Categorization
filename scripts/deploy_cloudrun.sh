@@ -1,99 +1,152 @@
 #!/bin/bash
-# Deploy to Google Cloud Run
-# 
-# Prerequisites:
-# - gcloud CLI installed and authenticated
-# - Docker installed (for local builds)
-# - Project ID and region configured
-# - Model weights uploaded to GCS bucket
+# =============================================================================
+# Canonical Cloud Run Deployment Script
+# Builds via Cloud Build, pushes to Artifact Registry, deploys to Cloud Run
+# =============================================================================
 
 set -e
 
 # =============================================================================
-# CONFIGURATION - Update these values
+# CONFIGURATION (do not change unless project structure changes)
 # =============================================================================
+PROJECT_ID="voice-detect-cloudrun"
+REGION="asia-south1"
+SERVICE_NAME="voice-detect-api"
+REPO_NAME="voice-detect-docker"
+IMAGE_NAME="voice-detect-api"
+IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:latest"
+SERVICE_ACCOUNT="voice-detect-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
 
-PROJECT_ID="${GCP_PROJECT_ID:-your-project-id}"
-SERVICE_NAME="${CLOUD_RUN_SERVICE:-voice-detection-api}"
-REGION="${GCP_REGION:-asia-south1}"
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
-
-# API configuration
-VOICE_API_KEYS="${VOICE_API_KEYS:-your-production-api-key}"
-
-# AASIST ensemble model configuration
-AASIST_DEVICE="cpu"
-AASIST_ORIG_WEIGHTS_GCS_URI="${AASIST_ORIG_WEIGHTS_GCS_URI:-gs://your-bucket/aasist_original.pth}"
-AASIST_FT_WEIGHTS_GCS_URI="${AASIST_FT_WEIGHTS_GCS_URI:-gs://your-bucket/aasist_finetuned_best.pth}"
-AASIST_ORIG_CACHE_PATH="/tmp/aasist_original.pth"
-AASIST_FT_CACHE_PATH="/tmp/aasist_finetuned_best.pth"
-AASIST_MAX_WINDOWS="3"
-AASIST_THRESHOLD="0.5"
+# GCS paths for model weights
+AASIST_ORIG_WEIGHTS_GCS_URI="gs://voice-detect-168345068797-models/models/aasist_original.pth"
+AASIST_FT_WEIGHTS_GCS_URI="gs://voice-detect-168345068797-models/models/aasist_finetuned_best.pth"
 
 # =============================================================================
-# BUILD AND DEPLOY
+# LOAD ENV VARS FROM .env IF PRESENT
 # =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    echo "Loading environment from .env file..."
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+fi
+
+# =============================================================================
+# VALIDATE PREREQUISITES
+# =============================================================================
 echo "========================================"
-echo "Deploying ${SERVICE_NAME} to Cloud Run"
-echo "Project: ${PROJECT_ID}"
-echo "Region: ${REGION}"
+echo "Validating prerequisites..."
 echo "========================================"
 
-# Ensure we're in the project directory
-cd "$(dirname "$0")/.."
+# Check gcloud is installed
+if ! command -v gcloud &> /dev/null; then
+    echo "ERROR: gcloud CLI not installed. Install from https://cloud.google.com/sdk/docs/install"
+    exit 1
+fi
 
-# Option 1: Build using Cloud Build (recommended)
-echo "Building image with Cloud Build..."
-gcloud builds submit --tag "${IMAGE_NAME}" --project "${PROJECT_ID}"
+# Check logged in
+if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q "@"; then
+    echo "ERROR: Not logged in to gcloud. Run: gcloud auth login"
+    exit 1
+fi
 
-# Option 2: Build locally and push (uncomment if preferred)
-# echo "Building image locally..."
-# docker build -t "${IMAGE_NAME}" .
-# docker push "${IMAGE_NAME}"
+# Check project is set correctly
+CURRENT_PROJECT=$(gcloud config get-value project 2>/dev/null)
+if [ "$CURRENT_PROJECT" != "$PROJECT_ID" ]; then
+    echo "WARNING: Current project is '$CURRENT_PROJECT', expected '$PROJECT_ID'"
+    echo "Setting project to $PROJECT_ID..."
+    gcloud config set project "$PROJECT_ID"
+fi
 
-# Deploy to Cloud Run
+# Check VOICE_API_KEYS is set
+if [ -z "$VOICE_API_KEYS" ]; then
+    echo "ERROR: VOICE_API_KEYS is not set."
+    echo "Set it in .env file or export VOICE_API_KEYS=your-key before running."
+    exit 1
+fi
+
+echo "✓ gcloud installed and authenticated"
+echo "✓ Project: $PROJECT_ID"
+echo "✓ VOICE_API_KEYS is set"
+
+# =============================================================================
+# CONFIGURE DOCKER AUTH FOR ARTIFACT REGISTRY
+# =============================================================================
+echo ""
+echo "========================================"
+echo "Configuring Artifact Registry auth..."
+echo "========================================"
+
+gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+echo "✓ Docker auth configured for ${REGION}-docker.pkg.dev"
+
+# =============================================================================
+# BUILD AND PUSH VIA CLOUD BUILD
+# =============================================================================
+echo ""
+echo "========================================"
+echo "Building and pushing image via Cloud Build..."
+echo "========================================"
+echo "Image URI: $IMAGE_URI"
+
+cd "$PROJECT_ROOT"
+
+gcloud builds submit --tag "$IMAGE_URI" .
+
+echo "✓ Image built and pushed: $IMAGE_URI"
+
+# =============================================================================
+# DEPLOY TO CLOUD RUN
+# =============================================================================
+echo ""
+echo "========================================"
 echo "Deploying to Cloud Run..."
-gcloud run deploy "${SERVICE_NAME}" \
-    --image "${IMAGE_NAME}" \
-    --region "${REGION}" \
-    --project "${PROJECT_ID}" \
+echo "========================================"
+
+gcloud run deploy "$SERVICE_NAME" \
+    --image "$IMAGE_URI" \
     --platform managed \
+    --region "$REGION" \
+    --service-account "$SERVICE_ACCOUNT" \
+    --memory 4Gi \
+    --cpu 2 \
+    --concurrency 1 \
+    --timeout 300 \
+    --max-instances 2 \
+    --min-instances 0 \
     --allow-unauthenticated \
     --set-env-vars="VOICE_API_KEYS=${VOICE_API_KEYS}" \
-    --set-env-vars="AASIST_DEVICE=${AASIST_DEVICE}" \
+    --set-env-vars="AASIST_DEVICE=cpu" \
     --set-env-vars="AASIST_ORIG_WEIGHTS_GCS_URI=${AASIST_ORIG_WEIGHTS_GCS_URI}" \
     --set-env-vars="AASIST_FT_WEIGHTS_GCS_URI=${AASIST_FT_WEIGHTS_GCS_URI}" \
-    --set-env-vars="AASIST_ORIG_CACHE_PATH=${AASIST_ORIG_CACHE_PATH}" \
-    --set-env-vars="AASIST_FT_CACHE_PATH=${AASIST_FT_CACHE_PATH}" \
-    --set-env-vars="AASIST_MAX_WINDOWS=${AASIST_MAX_WINDOWS}" \
-    --set-env-vars="AASIST_THRESHOLD=${AASIST_THRESHOLD}" \
-    --set-env-vars="ENABLE_DOCS=0" \
-    --set-env-vars="MAX_MP3_BYTES=15000000" \
-    --set-env-vars="MAX_DURATION_SECONDS=300" \
-    --memory=4Gi \
-    --cpu=2 \
-    --timeout=300s \
-    --concurrency=1 \
-    --min-instances=0 \
-    --max-instances=10
+    --set-env-vars="AASIST_ORIG_CACHE_PATH=/tmp/aasist_original.pth" \
+    --set-env-vars="AASIST_FT_CACHE_PATH=/tmp/aasist_finetuned_best.pth" \
+    --set-env-vars="AASIST_MAX_WINDOWS=3" \
+    --set-env-vars="AASIST_THRESHOLD=0.5" \
+    --set-env-vars="ENABLE_DOCS=0"
 
-# Note on settings:
-# - concurrency=1: Each instance handles one request at a time (safer for ML models)
-# - timeout=300s: Allow up to 5 minutes per request for audio processing
-# - memory=4Gi: Increased for PyTorch ensemble model loading (2 models)
-# - cpu=2: Two CPUs for ensemble inference
+echo "✓ Deployed to Cloud Run"
 
+# =============================================================================
+# GET SERVICE URL
+# =============================================================================
 echo ""
 echo "========================================"
-echo "Deployment complete!"
+echo "Deployment Complete!"
+echo "========================================"
+
+SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format="value(status.url)")
+
 echo ""
-echo "Get the service URL with:"
-echo "  gcloud run services describe ${SERVICE_NAME} --region ${REGION} --format='value(status.url)'"
+echo "Service Name:  $SERVICE_NAME"
+echo "Image URI:     $IMAGE_URI"
+echo "Service URL:   $SERVICE_URL"
 echo ""
-echo "Test the API with:"
-echo "  curl -X POST <SERVICE_URL>/api/voice-detection \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -H 'x-api-key: ${VOICE_API_KEYS}' \\"
-echo "    -d '{\"language\": \"English\", \"audioFormat\": \"mp3\", \"audioBase64\": \"<BASE64_MP3>\"}'"
+echo "Test with:"
+echo "  export SERVICE_URL=$SERVICE_URL"
+echo "  bash scripts/test_curl.sh sample.mp3"
 echo "========================================"

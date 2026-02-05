@@ -1,5 +1,5 @@
 # Dockerfile for AI-Generated Voice Detection API
-# Optimized for Google Cloud Run
+# Optimized for Google Cloud Run (CPU-only)
 
 FROM python:3.11-slim
 
@@ -8,9 +8,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080
 
-# Install system dependencies (ffmpeg for audio processing)
+# Install system dependencies
+# - ffmpeg: audio processing
+# - libsndfile1: required by soundfile Python package
+# - ca-certificates: SSL/TLS support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libsndfile1 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -19,7 +24,7 @@ WORKDIR /app
 # Copy requirements first for layer caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies (production only)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
@@ -33,9 +38,6 @@ USER appuser
 # Expose port (Cloud Run uses PORT env var)
 EXPOSE 8080
 
-# Health check (optional, Cloud Run handles this)
-# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-#     CMD curl -f http://localhost:8080/api/voice-detection || exit 1
-
 # Run the application
+# Cloud Run injects PORT; container must listen on 0.0.0.0
 CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT}"]

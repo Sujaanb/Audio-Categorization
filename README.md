@@ -144,36 +144,59 @@ The ensemble uses pattern detection to handle inverted predictions for Indian la
 
 ---
 
-## Cloud Run Deployment
+## Deploy to Cloud Run (Recommended)
 
 ### Prerequisites
 
-1. Upload model weights to GCS:
+1. **Install and authenticate gcloud CLI**:
    ```bash
-   gsutil cp aasist_original.pth gs://your-bucket/aasist_original.pth
-   gsutil cp aasist_finetuned_best.pth gs://your-bucket/aasist_finetuned_best.pth
+   gcloud auth login
+   gcloud config set project voice-detect-cloudrun
    ```
 
-2. Set environment variables:
+2. **Set your API key** in `.env` or environment:
    ```bash
-   export GCP_PROJECT_ID=your-project
-   export VOICE_API_KEYS=your-production-key
-   export AASIST_ORIG_WEIGHTS_GCS_URI=gs://your-bucket/aasist_original.pth
-   export AASIST_FT_WEIGHTS_GCS_URI=gs://your-bucket/aasist_finetuned_best.pth
+   export VOICE_API_KEYS=your-secret-api-key
    ```
 
-3. Deploy:
-   ```bash
-   chmod +x scripts/deploy_cloudrun.sh
-   ./scripts/deploy_cloudrun.sh
-   ```
+3. **Model weights** are pre-configured to load from GCS bucket:
+   - `gs://voice-detect-168345068797-models/models/aasist_original.pth`
+   - `gs://voice-detect-168345068797-models/models/aasist_finetuned_best.pth`
+
+### Deploy
+
+```bash
+bash scripts/deploy_cloudrun.sh
+```
+
+This script will:
+- Validate prerequisites (gcloud auth, project, API key)
+- Build image via Cloud Build
+- Push to Artifact Registry (`asia-south1-docker.pkg.dev`)
+- Deploy to Cloud Run with optimized settings
+- Print the service URL
+
+### Test the Deployment
+
+```bash
+# Get service URL
+export SERVICE_URL=$(gcloud run services describe voice-detect-api --region asia-south1 --format='value(status.url)')
+
+# Test with sample audio
+bash scripts/test_curl.sh sample.mp3
+```
 
 ### Resource Allocation
 
-- **Memory**: 4 GiB (two PyTorch models)
-- **CPU**: 2 vCPUs
-- **Timeout**: 300s
-- **Concurrency**: 1 (ML model inference)
+| Setting | Value | Reason |
+|---------|-------|--------|
+| Memory | 4 GiB | Two PyTorch models |
+| CPU | 2 vCPUs | Ensemble inference |
+| Timeout | 300s | Long audio processing |
+| Concurrency | 1 | ML model isolation |
+| Max instances | 2 | Cost control |
+
+**Note**: Cloud Run injects `PORT` env var. Container listens on `0.0.0.0:${PORT}`.
 
 ---
 
