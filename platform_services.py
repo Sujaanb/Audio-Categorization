@@ -134,7 +134,9 @@ async def voice_detection(
         # Step 2: Decode base64 to bytes (async to avoid blocking event loop for large files)
         logger.info(f"[{request_id}] Starting base64 decode ({len(body.audioBase64)} bytes)...")
         try:
-            mp3_bytes = await asyncio.to_thread(base64.b64decode, body.audioBase64, True)
+            mp3_bytes = await asyncio.to_thread(
+                lambda: base64.b64decode(body.audioBase64, validate=True)
+            )
         except Exception as e:
             logger.warning(f"[{request_id}] Invalid base64: {str(e)}")
             return create_error_response(400, "Invalid base64 encoding in audioBase64 field.")
