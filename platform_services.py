@@ -2,6 +2,7 @@
 Platform Services - API endpoints for Voice Detection.
 """
 
+import asyncio
 import base64
 import hmac
 import logging
@@ -130,12 +131,14 @@ async def voice_detection(
                 413, f"Audio too large. Maximum base64 length: {max_base64_len}"
             )
 
-        # Step 2: Decode base64 to bytes
+        # Step 2: Decode base64 to bytes (async to avoid blocking event loop for large files)
+        logger.info(f"[{request_id}] Starting base64 decode ({len(body.audioBase64)} bytes)...")
         try:
-            mp3_bytes = base64.b64decode(body.audioBase64, validate=True)
+            mp3_bytes = await asyncio.to_thread(base64.b64decode, body.audioBase64, True)
         except Exception as e:
             logger.warning(f"[{request_id}] Invalid base64: {str(e)}")
             return create_error_response(400, "Invalid base64 encoding in audioBase64 field.")
+        logger.info(f"[{request_id}] Base64 decoded to {len(mp3_bytes)} bytes")
 
         # Step 3: Check decoded bytes size
         if len(mp3_bytes) > settings.MAX_MP3_BYTES:
@@ -149,11 +152,13 @@ async def voice_detection(
             return create_error_response(400, "Empty audio data provided.")
 
         # Step 4: Decode MP3 to waveform (async to avoid blocking event loop)
+        logger.info(f"[{request_id}] Starting ffmpeg decode...")
         try:
             waveform, sr, duration = await decode_mp3_to_waveform(mp3_bytes)
         except AudioDecodeError as e:
             logger.warning(f"[{request_id}] Audio decode failed: {str(e)}")
             return create_error_response(400, f"Failed to decode MP3: {str(e)}")
+        logger.info(f"[{request_id}] Ffmpeg decode complete")
 
         # Step 5: Check duration limits
         if duration > settings.MAX_DURATION_SECONDS:
