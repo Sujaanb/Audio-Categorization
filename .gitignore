@@ -81,3 +81,9 @@ audio_base64.txt
 audio_base64_files/
 audio_samples/
 audio_to_base64.py
+
+# Test scripts
+local_test.py
+quick_test.py
+test_endpoint.py
+test_results.txt

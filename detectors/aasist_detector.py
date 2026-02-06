@@ -4,6 +4,7 @@ AASIST Detector - Single model for AI-generated voice detection.
 Uses the original AASIST model for inference across all supported languages.
 """
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Dict, List
@@ -71,7 +72,7 @@ class AASISTDetector(BaseDetector):
         
         logger.info("AASIST model loaded successfully")
 
-    def predict(
+    async def predict(
         self,
         language: str,
         mp3_bytes: bytes,
@@ -80,7 +81,7 @@ class AASISTDetector(BaseDetector):
         qc: Dict[str, float],
     ) -> PredictionResult:
         """
-        Run inference on audio waveform.
+        Run inference on audio waveform (async).
 
         Args:
             language: Input language (Tamil, English, Hindi, Malayalam, Telugu)
@@ -92,6 +93,20 @@ class AASISTDetector(BaseDetector):
         Returns:
             PredictionResult with classification, confidence, and explanation
         """
+        # Run inference in thread pool to avoid blocking event loop
+        return await asyncio.to_thread(
+            self._predict_sync, language, mp3_bytes, waveform, sr, qc
+        )
+
+    def _predict_sync(
+        self,
+        language: str,
+        mp3_bytes: bytes,
+        waveform: np.ndarray,
+        sr: int,
+        qc: Dict[str, float],
+    ) -> PredictionResult:
+        """Synchronous prediction - runs in thread pool."""
         # Get windows for multi-window inference
         windows = self._get_audio_windows(waveform)
 

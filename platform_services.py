@@ -148,9 +148,9 @@ async def voice_detection(
             logger.warning(f"[{request_id}] Empty audio data")
             return create_error_response(400, "Empty audio data provided.")
 
-        # Step 4: Decode MP3 to waveform
+        # Step 4: Decode MP3 to waveform (async to avoid blocking event loop)
         try:
-            waveform, sr, duration = decode_mp3_to_waveform(mp3_bytes)
+            waveform, sr, duration = await decode_mp3_to_waveform(mp3_bytes)
         except AudioDecodeError as e:
             logger.warning(f"[{request_id}] Audio decode failed: {str(e)}")
             return create_error_response(400, f"Failed to decode MP3: {str(e)}")
@@ -198,9 +198,9 @@ async def voice_detection(
                 explanation=explanation,
             )
 
-        # Step 8: Call detector for classification
+        # Step 8: Call detector for classification (async to avoid blocking)
         detector = get_detector()
-        result = detector.predict(
+        result = await detector.predict(
             language=body.language,
             mp3_bytes=mp3_bytes,
             waveform=waveform,
