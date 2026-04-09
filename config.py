@@ -53,6 +53,19 @@ class Settings(BaseSettings):
     SILENCE_RATIO_THRESHOLD: float = 0.80
 
     # ==========================================================================
+    # Rate Limiting Configuration
+    # ==========================================================================
+
+    # Rate limit: max requests per period per API key
+    RATE_LIMIT_REQUESTS: int = 100
+
+    # Rate limit period in seconds (default: 60 = 1 minute)
+    RATE_LIMIT_PERIOD_SECONDS: int = 60
+
+    # Enable metrics endpoint for tracking API usage
+    ENABLE_METRICS_ENDPOINT: bool = False
+
+    # ==========================================================================
     # Server Configuration
     # ==========================================================================
 

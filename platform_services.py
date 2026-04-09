@@ -23,6 +23,7 @@ from config import settings
 from detectors import get_detector
 from services import AudioDecodeError, compute_qc_metrics, decode_mp3_to_waveform
 from services.qc import is_insufficient_signal
+from services.rate_limiter import rate_limiter
 
 # Configure logging
 logging.basicConfig(
@@ -92,6 +93,16 @@ async def verify_api_key(api_key: Optional[str] = Depends(api_key_header)) -> st
     return api_key
 
 
+def create_rate_limit_response(
+    status_code: int, message: str, api_key: str
+) -> JSONResponse:
+    """Create a rate limit error response with rate limit headers."""
+    response = create_error_response(status_code, message)
+    headers = rate_limiter.get_rate_limit_headers(api_key)
+    response.headers.update(headers)
+    return response
+
+
 @api_router.post(
     "/api/voice-detection",
     response_model=VoiceDetectionSuccessResponse,
@@ -99,6 +110,7 @@ async def verify_api_key(api_key: Optional[str] = Depends(api_key_header)) -> st
         400: {"model": VoiceDetectionErrorResponse, "description": "Bad Request"},
         401: {"model": VoiceDetectionErrorResponse, "description": "Unauthorized"},
         413: {"model": VoiceDetectionErrorResponse, "description": "Payload Too Large"},
+        429: {"model": VoiceDetectionErrorResponse, "description": "Too Many Requests"},
         500: {"model": VoiceDetectionErrorResponse, "description": "Internal Server Error"},
     },
 )
@@ -113,6 +125,8 @@ async def voice_detection(
     Accepts Base64-encoded MP3 audio and returns classification with confidence.
 
     Supported languages: Tamil, English, Hindi, Malayalam, Telugu
+
+    Rate Limit: 100 requests per minute per API key.
     """
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
@@ -122,14 +136,33 @@ async def voice_detection(
         f"[{request_id}] Voice detection request: language={body.language}"
     )
 
+    # Step 0: Check rate limit
+    allowed, current_count, limit = rate_limiter.check_rate_limit(api_key)
+    if not allowed:
+        logger.warning(
+            f"[{request_id}] Rate limit exceeded for API key (last 4 chars: ...{api_key.lower()[-4:]})"
+        )
+        response = create_rate_limit_response(
+            429,
+            f"Rate limit exceeded. Maximum {limit} requests per {settings.RATE_LIMIT_PERIOD_SECONDS}s.",
+            api_key,
+        )
+        # Record failed request in metrics
+        latency_ms = (time.time() - start_time) * 1000
+        rate_limiter.record_request(api_key, body.language, latency_ms, False)
+        return response
+
     try:
         # Step 1: Check base64 string length to prevent memory issues
         max_base64_len = settings.get_max_base64_length()
         if len(body.audioBase64) > max_base64_len:
             logger.warning(f"[{request_id}] Base64 string too long: {len(body.audioBase64)}")
-            return create_error_response(
+            response = create_error_response(
                 413, f"Audio too large. Maximum base64 length: {max_base64_len}"
             )
+            latency_ms = (time.time() - start_time) * 1000
+            rate_limiter.record_request(api_key, body.language, latency_ms, False)
+            return response
 
         # Step 2: Decode base64 to bytes (async to avoid blocking event loop for large files)
         logger.info(f"[{request_id}] Starting base64 decode ({len(body.audioBase64)} bytes)...")
@@ -139,19 +172,28 @@ async def voice_detection(
             )
         except Exception as e:
             logger.warning(f"[{request_id}] Invalid base64: {str(e)}")
-            return create_error_response(400, "Invalid base64 encoding in audioBase64 field.")
+            response = create_error_response(400, "Invalid base64 encoding in audioBase64 field.")
+            latency_ms = (time.time() - start_time) * 1000
+            rate_limiter.record_request(api_key, body.language, latency_ms, False)
+            return response
         logger.info(f"[{request_id}] Base64 decoded to {len(mp3_bytes)} bytes")
 
         # Step 3: Check decoded bytes size
         if len(mp3_bytes) > settings.MAX_MP3_BYTES:
             logger.warning(f"[{request_id}] MP3 too large: {len(mp3_bytes)} bytes")
-            return create_error_response(
+            response = create_error_response(
                 413, f"Audio file too large. Maximum size: {settings.MAX_MP3_BYTES} bytes."
             )
+            latency_ms = (time.time() - start_time) * 1000
+            rate_limiter.record_request(api_key, body.language, latency_ms, False)
+            return response
 
         if len(mp3_bytes) == 0:
             logger.warning(f"[{request_id}] Empty audio data")
-            return create_error_response(400, "Empty audio data provided.")
+            response = create_error_response(400, "Empty audio data provided.")
+            latency_ms = (time.time() - start_time) * 1000
+            rate_limiter.record_request(api_key, body.language, latency_ms, False)
+            return response
 
         # Step 4: Decode MP3 to waveform (async to avoid blocking event loop)
         logger.info(f"[{request_id}] Starting ffmpeg decode...")
@@ -159,15 +201,21 @@ async def voice_detection(
             waveform, sr, duration = await decode_mp3_to_waveform(mp3_bytes)
         except AudioDecodeError as e:
             logger.warning(f"[{request_id}] Audio decode failed: {str(e)}")
-            return create_error_response(400, f"Failed to decode MP3: {str(e)}")
+            response = create_error_response(400, f"Failed to decode MP3: {str(e)}")
+            latency_ms = (time.time() - start_time) * 1000
+            rate_limiter.record_request(api_key, body.language, latency_ms, False)
+            return response
         logger.info(f"[{request_id}] Ffmpeg decode complete")
 
         # Step 5: Check duration limits
         if duration > settings.MAX_DURATION_SECONDS:
             logger.warning(f"[{request_id}] Audio too long: {duration:.2f}s")
-            return create_error_response(
+            response = create_error_response(
                 400, f"Audio too long ({duration:.1f}s). Maximum: {settings.MAX_DURATION_SECONDS}s."
             )
+            latency_ms = (time.time() - start_time) * 1000
+            rate_limiter.record_request(api_key, body.language, latency_ms, False)
+            return response
 
         # Step 6: Compute QC metrics
         qc_metrics = compute_qc_metrics(waveform, sr)
@@ -198,12 +246,24 @@ async def voice_detection(
             else:
                 explanation += f"High silence ratio ({qc_metrics['silence_ratio']*100:.0f}%)."
 
-            return VoiceDetectionSuccessResponse(
+            response_obj = VoiceDetectionSuccessResponse(
                 language=body.language,
                 classification="HUMAN",
                 confidenceScore=round(0.50 + (qc_metrics["rms"] * 0.5), 2),  # 0.50-0.55 range
                 explanation=explanation,
             )
+            
+            # Record successful request in metrics
+            rate_limiter.record_request(api_key, body.language, latency_ms, True)
+            
+            # Add rate limit headers to response
+            response = JSONResponse(
+                status_code=200,
+                content=response_obj.model_dump(),
+            )
+            headers = rate_limiter.get_rate_limit_headers(api_key)
+            response.headers.update(headers)
+            return response
 
         # Step 8: Call detector for classification (async to avoid blocking)
         detector = get_detector()
@@ -221,16 +281,69 @@ async def voice_detection(
             f"confidence={result.confidenceScore:.2f}, latency={latency_ms:.0f}ms"
         )
 
-        return VoiceDetectionSuccessResponse(
+        response_obj = VoiceDetectionSuccessResponse(
             language=body.language,
             classification=result.classification,
             confidenceScore=round(result.confidenceScore, 2),
             explanation=result.explanation,
         )
+        
+        # Record successful request in metrics
+        rate_limiter.record_request(api_key, body.language, latency_ms, True)
+        
+        # Add rate limit headers to response
+        response = JSONResponse(
+            status_code=200,
+            content=response_obj.model_dump(),
+        )
+        headers = rate_limiter.get_rate_limit_headers(api_key)
+        response.headers.update(headers)
+        return response
 
     except HTTPException:
         raise
     except Exception as e:
         latency_ms = (time.time() - start_time) * 1000
         logger.exception(f"[{request_id}] Unhandled error after {latency_ms:.0f}ms: {str(e)}")
-        return create_error_response(500, "Internal server error. Please try again later.")
+        response = create_error_response(500, "Internal server error. Please try again later.")
+        rate_limiter.record_request(api_key, body.language, latency_ms, False)
+        return response
+
+
+@api_router.get(
+    "/api/admin/metrics",
+    tags=["Admin"],
+    responses={
+        401: {"model": VoiceDetectionErrorResponse, "description": "Unauthorized"},
+        404: {"model": VoiceDetectionErrorResponse, "description": "Not Found"},
+    },
+)
+async def get_metrics(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Get usage metrics for your API key.
+
+    Returns statistics on requests, success rate, latency, and language distribution.
+    Only available if ENABLE_METRICS_ENDPOINT=1 is configured.
+    """
+    if not settings.ENABLE_METRICS_ENDPOINT:
+        raise HTTPException(
+            status_code=404,
+            detail=VoiceDetectionErrorResponse(
+                message="Metrics endpoint is not enabled."
+            ).model_dump(),
+        )
+
+    metrics = rate_limiter.get_metrics(api_key)
+    
+    response = JSONResponse(
+        status_code=200,
+        content={
+            "status": "success",
+            "metrics": metrics,
+        },
+    )
+    headers = rate_limiter.get_rate_limit_headers(api_key)
+    response.headers.update(headers)
+    return response
